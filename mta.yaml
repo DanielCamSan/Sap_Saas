@@ -1,0 +1,119 @@
+_schema-version: '3.2'
+ID: madsaasbirds
+version: 0.0.1
+
+parameters:
+  enable-parallel-deployments: true
+
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm install --production
+        - npx -p @sap/cds-dk cds build --production
+#        - npx rimraf gen/db/src/gen/data # uncomment this line to prevent loading of initial data which is only relevant for dev/test deployments 
+#        - npx rimraf gen/db/src/gen/csv  # uncomment this line unless db/csv folder has been used for config/control table data which is entirely managed by the developer and never changed by the app
+
+modules:
+
+  # --------------------- SERVER MODULE ------------------------
+  - name: madsaasbirds-srv
+  # ------------------------------------------------------------
+    type: nodejs
+    path: gen/srv
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 512M
+      disk-quota: 1024M
+    requires:
+      - name: madsaasbirds-uaa
+      - name: madsaasbirds-registry
+      - name: madsaasbirds-sm
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+
+
+  # ------------------ APP ROUTER MODULE -----------------------
+  - name: madsaasbirds
+  # ------------------------------------------------------------
+    type: approuter.nodejs
+    path: app
+    parameters:
+      memory: 256M
+      disk-quota: 1024M
+      keep-existing-routes: true
+    properties:
+      TENANT_HOST_PATTERN: '^(.*)-${space}-${app-name}.${default-domain}'
+    requires:
+      - name: madsaasbirds-uaa
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv
+          url: ~{srv-url}
+          timeout: 60000
+          forwardAuthToken: true
+    provides:
+      - name: app_api
+        properties:
+          url: ${default-url}
+          application: ${app-name}
+
+
+resources:
+  # ----------------------- UAA SERVICE ------------------------
+  - name: madsaasbirds-uaa
+  # ------------------------------------------------------------
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      xsuaa-app: ${space}-~{app_api/application}
+      config:
+        xsappname: ${xsuaa-app}
+    properties:
+      XSAPPNAME: ${xsuaa-app}
+    requires: 
+      - name: app_api
+
+
+
+
+
+
+  # --------------------- REGISTRY SERVICE ---------------------
+  - name: madsaasbirds-registry
+  # ------------------------------------------------------------
+    type: org.cloudfoundry.managed-service
+    requires:
+      - name: madsaasbirds-uaa
+    parameters:
+      service: saas-registry
+      service-plan: application
+      config:
+        xsappname: ~{madsaasbirds-uaa/XSAPPNAME}
+        appName: madsaasbirds
+        displayName: 'App'
+        description: 'Business Application'
+        category: 'SaaS Multitenant Apps'
+        appUrls:
+          onSubscription: https://${org}-${space}-madsaasbirds-srv.${default-domain}/mtx/v1/provisioning/tenant/{tenantId}
+
+  # ------------------- SERVICE MANAGER SERVICE ----------------
+  - name: madsaasbirds-sm
+  # ------------------------------------------------------------
+    type: org.cloudfoundry.managed-service
+    requires:
+     - name: madsaasbirds-uaa
+    parameters:
+       service: service-manager
+       service-plan: container
+       polling_timeout_seconds: 240
+       config:
+         acquireTimeoutMillis: max
+         polling_timeout_seconds: 480
+
+
