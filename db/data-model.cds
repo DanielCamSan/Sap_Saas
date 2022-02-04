@@ -10,7 +10,14 @@ entity Sales {
       comments    : String(100);
       criticality : Integer;
 };
-
+entity Aves{
+    key ID     : Integer;
+        nombre   : String(100);
+        tamanio  : String(100);
+        dieta    : String(100);
+        duenio   : String(100);
+        peso     : Integer
+};
 
 }
 
